@@ -55,14 +55,14 @@ app.post("/speak", async (req, res) => {
 
 // 💬 GPT 응답
 app.post("/chat", async (req, res) => {
-    const {
-      message,
-      level = "beginner",
-      languageCode = "en-US"
-    } = req.body;
-  
-    if (!message || typeof message !== "string") {
-      return res.status(400).json({ error: "메시지가 비어있습니다." });
+    const { message, level = "beginner", languageCode = "en-US", formality = "polite" } = req.body;
+
+    let toneInstruction = "";
+
+    if (formality === "polite") {
+    toneInstruction = "Speak politely in 존댓말 (formal Korean).";
+    } else if (formality === "casual") {
+    toneInstruction = "Speak casually in 반말 (informal Korean).";
     }
   
     // 🔥 난이도 설명 프롬프트 추가
@@ -76,24 +76,42 @@ app.post("/chat", async (req, res) => {
     }
   
     try {
-      const gptResponse = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [
+        const gptResponse = await openai.chat.completions.create({
+            model: "gpt-3.5-turbo",
+            messages: [
+              {
+                role: "system",
+                content: `
+          You're an AI tutor having a casual conversation with the user.
+          After each response, analyze your own message and return its emotion in one word (joy, sad, angry, surprised, thinking, neutral, etc).
+          Return your response in this JSON format:
+          
           {
-            role: "system",
-            content: `
-  You are a friendly and casual language partner.
-  Have a natural, fun conversation with the user.
-  ${levelDescription}
-  Reply in ${languageCode}.
-            `.trim()
-          },
-          { role: "user", content: message },
-        ],
-      });
+            "response": "[GPT 응답]",
+            "emotion": "[emotion]"
+          }
+          
+          Only return valid JSON. Do not explain.
+          `.trim()
+              },
+              { role: "user", content: message },
+            ],
+          });
   
-      const reply = gptResponse.choices[0].message.content.trim();
-      res.json({ response: reply });
+          let reply = "";
+          let emotion = "neutral";
+          
+          try {
+            const parsed = JSON.parse(gptResponse.choices[0].message.content);
+            reply = parsed.response.trim();
+            emotion = parsed.emotion.trim().toLowerCase();
+          } catch (e) {
+            // 실패 시 fallback
+            reply = gptResponse.choices[0].message.content.trim();
+            emotion = "neutral";
+          }
+          
+          res.json({ response: reply, emotion });
     } catch (error) {
       console.error("🔴 GPT 오류:", error);
       res.status(500).json({ error: "GPT 응답 실패" });

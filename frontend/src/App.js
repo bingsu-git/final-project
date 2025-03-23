@@ -17,6 +17,8 @@ function App() {
   const [recognitionListening, setRecognitionListening] = useState(false);
   const [language, setLanguage] = useState("en-US");
   const [level, setLevel] = useState("beginner");
+  const [formality, setFormality] = useState("polite");
+  const [emotion, setEmotion] = useState("smile");
 
   // ✅ Google TTS 백엔드 호출 및 음성 재생
   const playTTS = async (text, lang = "en-US") => {
@@ -61,12 +63,17 @@ function App() {
           message: text,
           level,
           languageCode: language, // 같이 보내면 백엔드에서 더 자연스럽게 사용 가능
+          formality,
         }),
       });
 
       const data = await res.json();
       const gptResponse = { role: "assistant", content: data.response };
       setChatLog((prev) => [...prev, gptResponse]);
+
+      if (data.emotion) {
+        setEmotion(data.emotion); // joy, sad, surprised 등
+      }
 
       await playTTS(removeEmojis(data.response), language); // 🔊 GPT 응답을 자동으로 읽음
     } catch (err) {
@@ -104,65 +111,117 @@ function App() {
   };
 
   return (
-    <div style={{ maxWidth: "600px", margin: "50px auto", fontFamily: "Arial" }}>
-      <h2>🌐 Chat to learn with AI</h2>
-
-      {/* 🌍 언어 선택 */}
-      <div style={{ marginBottom: "15px" }}>
-        <label>언어 설정 (음성 인식 & TTS): </label>
-        <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-          <option value="en-US">🇺🇸 영어</option>
-          <option value="ko-KR">🇰🇷 한국어</option>
-          <option value="ja-JP">🇯🇵 일본어</option>
-          <option value="fr-FR">🇫🇷 프랑스어</option>
-          <option value="zh-CN">🇨🇳 중국어</option>
-          <option value="es-ES">🇪🇸 스페인어</option>
-        </select>
+    <div
+      style={{
+        backgroundImage: "url('/images/izakaya-bg.jpg')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        height: "100vh",
+        padding: "30px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        fontFamily: "Arial",
+        color: "#fff",
+        textShadow: "1px 1px 4px rgba(0,0,0,0.8)",
+      }}
+    >
+      {/* 🎨 중앙 AI 캐릭터 */}
+      <div style={{ flex: 1, textAlign: "center" }}>
+     <img
+        src={`/images/${emotion}.png`} // 예: joy.png, surprised.png
+        alt=""
+        style={{ width: "300px", height: "auto", borderRadius: "20px" }}
+      />
       </div>
-
-      <div style={{ marginBottom: "15px" }}>
-  <label>회화 난이도: </label>
-  <select value={level} onChange={(e) => setLevel(e.target.value)}>
-    <option value="beginner">🔰 Beginner</option>
-    <option value="intermediate">🚶 Intermediate</option>
-    <option value="advanced">🧠 Advanced</option>
-  </select>
-</div>
-
-      {/* 💬 채팅창 */}
+  
+      {/* 💬 채팅 UI 영역 */}
       <div
         style={{
-          border: "1px solid #ccc",
-          padding: "10px",
-          height: "300px",
-          overflowY: "scroll",
-          marginBottom: "20px",
-          backgroundColor: "#f9f9f9",
+          width: "380px",
+          backgroundColor: "rgba(255, 255, 255, 0.9)",
+          padding: "20px",
+          borderRadius: "15px",
+          color: "#000",
+          height: "80vh",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
         }}
       >
-        {chatLog.map((msg, i) => (
-          <div key={i} style={{ marginBottom: "10px" }}>
-            <strong>{msg.role === "user" ? "🙋 나" : "🤖 GPT"}:</strong> {msg.content}
+        {/* 언어/난이도/말투 선택 */}
+        <div>
+          <div style={{ marginBottom: "10px" }}>
+            <label>언어: </label>
+            <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+              <option value="en-US">영어</option>
+              <option value="ko-KR">한국어</option>
+              <option value="ja-JP">일본어</option>
+              <option value="fr-FR">프랑스어</option>
+              <option value="zh-CN">중국어</option>
+              <option value="es-ES">스페인어</option>
+            </select>
           </div>
-        ))}
+  
+          <div style={{ marginBottom: "10px" }}>
+            <label>난이도: </label>
+            <select value={level} onChange={(e) => setLevel(e.target.value)}>
+              <option value="beginner">초급</option>
+              <option value="intermediate">중급</option>
+              <option value="advanced">고급</option>
+            </select>
+          </div>
+  
+          <div style={{ marginBottom: "10px" }}>
+            <label>말투: </label>
+            <select value={formality} onChange={(e) => setFormality(e.target.value)}>
+              <option value="polite">존댓말</option>
+              <option value="casual">반말</option>
+            </select>
+          </div>
+        </div>
+  
+        {/* 💬 채팅 로그 */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            marginBottom: "10px",
+            padding: "10px",
+            background: "#f4f4f4",
+            borderRadius: "10px",
+          }}
+        >
+          {chatLog.map((msg, i) => (
+            <div key={i} style={{ marginBottom: "10px" }}>
+              <strong>{msg.role === "user" ? "나" : "GPT"}:</strong> {msg.content}
+            </div>
+          ))}
+        </div>
+  
+        {/* 입력창 + 버튼 */}
+        <div>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="메시지를 입력하세요"
+            style={{ width: "100%", padding: "8px", marginBottom: "10px" }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <button onClick={() => handleSubmit()} style={{ flex: 1, marginRight: "10px" }}>
+              보내기
+            </button>
+            <button onClick={handleVoiceInput} style={{ flex: 1 }}>
+              🎤 음성 입력
+            </button>
+          </div>
+        </div>
       </div>
-
-      {/* 입력창 + 버튼 */}
-      <input
-        type="text"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder="말하거나 입력해보세요!"
-        style={{ width: "70%", padding: "8px" }}
-      />
-      <button onClick={() => handleSubmit()} style={{ marginLeft: "10px" }}>
-        보내기
-      </button>
-      <button onClick={handleVoiceInput} style={{ marginLeft: "10px" }}>
-        🎤 음성 입력
-      </button>
     </div>
   );
+  
 }
 
 export default App;
