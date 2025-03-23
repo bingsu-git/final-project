@@ -15,47 +15,91 @@ app.use(express.json());
 
 // 🎤 TTS
 app.post("/speak", async (req, res) => {
-  const { text, languageCode = "en-US", gender = "NEUTRAL" } = req.body;
-
-  try {
+    const { text, languageCode = "en-US", gender = "NEUTRAL" } = req.body;
+  
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({ error: "텍스트가 없습니다." });
+    }
+  
+    const voiceMap = {
+      "en-US": "en-US-Wavenet-F",
+      "ko-KR": "ko-KR-Wavenet-A",
+      "ja-JP": "ja-JP-Wavenet-A",
+      "fr-FR": "fr-FR-Wavenet-A",
+      "es-ES": "es-ES-Wavenet-A",
+      "zh-CN": "zh-CN-Wavenet-A",
+    };
+  
     const request = {
       input: { text },
-      voice: { languageCode, ssmlGender: gender },
+      voice: {
+        languageCode,
+        name: voiceMap[languageCode] || languageCode,
+        ssmlGender: "FEMALE",
+      },
       audioConfig: { audioEncoding: "MP3" },
     };
-    const [response] = await client.synthesizeSpeech(request);
-    const audioBase64 = response.audioContent.toString("base64");
-    res.json({ audioContent: audioBase64 });
-  } catch (error) {
-    console.error("🔴 TTS 오류:", error);
-    res.status(500).json({ error: "TTS 처리 실패" });
-  }
-});
+
+    console.log("🎙️ TTS 요청 언어:", languageCode);
+    console.log("🔊 선택된 목소리:", request.voice.name);
+  
+    try {
+      const [response] = await client.synthesizeSpeech(request);
+      const audioBase64 = response.audioContent.toString("base64");
+      res.json({ audioContent: audioBase64 });
+    } catch (error) {
+      console.error("TTS 오류:", error);
+      res.status(500).json({ error: "TTS 처리 실패" });
+    }
+  });
 
 // 💬 GPT 응답
 app.post("/chat", async (req, res) => {
-  const { message } = req.body;
-
-  if (!message || typeof message !== "string") {
-    return res.status(400).json({ error: "메시지가 비어있습니다." });
-  }
-
-  try {
-    const gptResponse = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo", // 필요하면 "gpt-4"로 변경
-      messages: [
-        { role: "system", content: "You are a helpful foreign language tutor." },
-        { role: "user", content: message },
-      ],
-    });
-
-    const reply = gptResponse.choices[0].message.content.trim();
-    res.json({ response: reply });
-  } catch (error) {
-    console.error("🔴 GPT 오류:", error);
-    res.status(500).json({ error: "GPT 응답 실패" });
-  }
-});
+    const {
+      message,
+      level = "beginner",
+      languageCode = "en-US"
+    } = req.body;
+  
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ error: "메시지가 비어있습니다." });
+    }
+  
+    // 🔥 난이도 설명 프롬프트 추가
+    let levelDescription = "";
+    if (level === "beginner") {
+      levelDescription = "Use short, simple sentences and very basic words. Speak slowly and clearly.";
+    } else if (level === "intermediate") {
+      levelDescription = "Speak naturally and use common everyday phrases. You can include some slang.";
+    } else if (level === "advanced") {
+      levelDescription = "Speak freely using natural, complex expressions, idioms, and jokes if appropriate.";
+    }
+  
+    try {
+      const gptResponse = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [
+          {
+            role: "system",
+            content: `
+  You are a friendly and casual language partner.
+  Have a natural, fun conversation with the user.
+  ${levelDescription}
+  Reply in ${languageCode}.
+            `.trim()
+          },
+          { role: "user", content: message },
+        ],
+      });
+  
+      const reply = gptResponse.choices[0].message.content.trim();
+      res.json({ response: reply });
+    } catch (error) {
+      console.error("🔴 GPT 오류:", error);
+      res.status(500).json({ error: "GPT 응답 실패" });
+    }
+  });
+  
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

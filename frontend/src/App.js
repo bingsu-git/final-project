@@ -6,12 +6,17 @@ const recognition = new SpeechRecognition();
 recognition.interimResults = false;
 recognition.continuous = false;
 recognition.maxAlternatives = 1;
+function removeEmojis(text) {
+  // 유니코드 이모지 제거 정규식
+  return text.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|[\uD83C-\uDBFF\uDC00-\uDFFF]|\uFE0F|\u200D)+/g, '');
+}
 
 function App() {
   const [input, setInput] = useState("");
   const [chatLog, setChatLog] = useState([]);
   const [recognitionListening, setRecognitionListening] = useState(false);
   const [language, setLanguage] = useState("en-US");
+  const [level, setLevel] = useState("beginner");
 
   // ✅ Google TTS 백엔드 호출 및 음성 재생
   const playTTS = async (text, lang = "en-US") => {
@@ -52,14 +57,18 @@ function App() {
       const res = await fetch("http://localhost:5000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          level,
+          languageCode: language, // 같이 보내면 백엔드에서 더 자연스럽게 사용 가능
+        }),
       });
 
       const data = await res.json();
       const gptResponse = { role: "assistant", content: data.response };
       setChatLog((prev) => [...prev, gptResponse]);
 
-      await playTTS(data.response, language); // 🔊 GPT 응답을 자동으로 읽음
+      await playTTS(removeEmojis(data.response), language); // 🔊 GPT 응답을 자동으로 읽음
     } catch (err) {
       console.error("❌ GPT 통신 오류:", err);
     }
@@ -110,6 +119,15 @@ function App() {
           <option value="es-ES">🇪🇸 스페인어</option>
         </select>
       </div>
+
+      <div style={{ marginBottom: "15px" }}>
+  <label>회화 난이도: </label>
+  <select value={level} onChange={(e) => setLevel(e.target.value)}>
+    <option value="beginner">🔰 Beginner</option>
+    <option value="intermediate">🚶 Intermediate</option>
+    <option value="advanced">🧠 Advanced</option>
+  </select>
+</div>
 
       {/* 💬 채팅창 */}
       <div
