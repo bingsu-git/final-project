@@ -1,2 +1,1 @@
-# Final Project
-This is my AI language learning project.
+2025 캡스톤 디자인
