@@ -47,7 +47,7 @@ function App() {
       const res = await fetch("http://localhost:5000/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, languageCode: language }),
+        body: JSON.stringify({ text, languageCode: language, situation }),
       });
       const data = await res.json();
       if (data.audioContent) {
@@ -252,15 +252,21 @@ function App() {
       <h2>외국어 회화 연습</h2>
 
       {mode === "select" && (
-        <div style={{ textAlign: "center", marginTop: "30px" }}>
-          <button onClick={() => selectLanguage("ja-JP")} style={{ padding: "10px 20px", marginBottom: "15px" }}>
-            일본어로 연습하기
-          </button>
-          <br />
-          <button onClick={() => selectLanguage("en-US")} style={{ padding: "10px 20px" }}>
-            영어로 연습하기
-          </button>
-        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: "30px", gap: "15px" }}>
+        <button
+          onClick={() => selectLanguage("ja-JP")}
+          style={{ width: "200px", padding: "10px 20px", fontSize: "16px" }}
+        >
+          일본어로 연습하기
+        </button>
+        <button
+          onClick={() => selectLanguage("en-US")}
+          style={{ width: "200px", padding: "10px 20px", fontSize: "16px" }}
+        >
+          영어로 연습하기
+        </button>
+      </div>
+      
       )}
 
       {mode !== "select" && (
@@ -293,6 +299,35 @@ function App() {
               )}
             </div>
           )}
+          {mode === "en" && (
+  <div style={{ marginBottom: "15px", display: "flex", gap: "10px" }}>
+    <button
+      onClick={() => selectSituation("airport-traveler")}
+      style={{
+        fontSize: "14px",
+        padding: "6px 12px",
+        backgroundColor: situation === "airport-traveler" ? "#d1e7dd" : "#fff",
+        border: "1px solid #ccc",
+      }}
+    >
+      공항에서 만난 여행자
+    </button>
+    {situation === "airport-traveler" && (
+      <button
+        onClick={cancelSituation}
+        style={{
+          fontSize: "14px",
+          padding: "6px 12px",
+          backgroundColor: "#f8d7da",
+          border: "1px solid #ccc",
+        }}
+      >
+        취소
+      </button>
+    )}
+  </div>
+)}
+
 
           <div style={{
             border: "1px solid #ccc",

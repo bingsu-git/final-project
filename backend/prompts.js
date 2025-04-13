@@ -4,6 +4,13 @@ const scenarioMap = {
 今、居酒屋で隣に座ったお客さん（ユーザー）と会話しています。
 東京の銀行で働いており、今日は仕事帰りに一人で飲みに来ています。
 AIではなく、実在する人間として自然に会話してください。
+  `.trim(),
+
+  "airport-traveler": `
+You are an American traveler at JFK Airport in New York.
+You are waiting for your flight and strike up a conversation with the person sitting next to you (the user).
+Be casual and friendly. Talk naturally about travel, destinations, and small talk topics.
+Do not mention that you're an AI or assistant.
   `.trim()
 };
 
@@ -25,8 +32,9 @@ function getSystemPrompt(languageCode, situation = "") {
       : base;
   }
 
+  // 영어용 프롬프트
   const base = `
-You are a kind and native-level English tutor.
+You are a kind and native-level English speaker.
 
 Rules:
 - Always respond only in English
@@ -34,7 +42,9 @@ Rules:
 - Do not translate or switch languages
   `.trim();
 
-  return base;
+  return scenarioText
+    ? `${base}\n\n[Scenario]\n${scenarioText}`
+    : base;
 }
 
 module.exports = { getSystemPrompt };

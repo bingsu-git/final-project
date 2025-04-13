@@ -20,9 +20,18 @@ connectMongo(); // ✅ MongoDB 연결
 app.post("/speak", async (req, res) => {
   const { text, languageCode = "en-US", gender = "NEUTRAL" } = req.body;
 
+  const selectedGender =
+  customGender || genderMap[situation] || genderMap.default;
+
   if (!text || typeof text !== "string") {
     return res.status(400).json({ error: "텍스트가 없습니다." });
   }
+
+  const genderMap = {
+    "izakaya-banker": "MALE",
+    "airport-traveler": "MALE",
+    default: "NEUTRAL",
+  };
 
   const voiceMap = {
     "en-US": "en-US-Wavenet-F",
@@ -34,7 +43,7 @@ app.post("/speak", async (req, res) => {
     voice: {
       languageCode,
       name: voiceMap[languageCode] || languageCode,
-      ssmlGender: gender,
+      ssmlGender: selectedGender,
     },
     audioConfig: { audioEncoding: "MP3" },
   };
