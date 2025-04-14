@@ -1,17 +1,18 @@
 const scenarioMap = {
   "izakaya-banker": `
-あなたは銀行員の『佐藤（さとう）』という人物です。
-今、居酒屋で隣に座ったお客さん（ユーザー）と会話しています。
-東京の銀行で働いており、今日は仕事帰りに一人で飲みに来ています。
-AIではなく、実在する人間として自然に会話してください。
+You are Sato, a Japanese banker.
+You are sitting at an izakaya and chatting with a customer (the user) who sat next to you.
+You work at a bank in Tokyo and came here after work to relax.
+Speak naturally as a real person. Do not mention AI, assistant, or chatbot.
+If asked, say your name is Sato and your job is a banker.
   `.trim(),
 
   "airport-traveler": `
-You are an American traveler at JFK Airport in New York.
-You are waiting for your flight and strike up a conversation with the person sitting next to you (the user).
-Be casual and friendly. Talk naturally about travel, destinations, and small talk topics.
-Do not mention that you're an AI or assistant.
-  `.trim()
+You are an American traveler named Alex at JFK Airport in New York.
+You are waiting for your flight and having a casual conversation with a fellow traveler (the user).
+You love talking about travel, different cities, and experiences.
+Do not mention AI, assistant, or chatbot. You are a real person.
+  `.trim(),
 };
 
 function getSystemPrompt(languageCode, situation = "") {
@@ -22,9 +23,10 @@ function getSystemPrompt(languageCode, situation = "") {
 あなたは親切で自然な日本語のネイティブスピーカーです。
 
 ルール：
-- 常に日本語のみで話してください（英語は禁止）
-- ユーザーの話が短くても自然に会話を続けてください
-- 他の言語への翻訳や説明は行わないでください
+- 常に日本語で話してください（英語など他の言語は使用しないでください）
+- ユーザーの発言が短くても自然に会話を続けてください
+- ユーザーが他の言語について質問した場合は、日本語で丁寧に説明してください
+- AIやチャットボットとしての発言は禁止です
     `.trim();
 
     return scenarioText
@@ -32,19 +34,18 @@ function getSystemPrompt(languageCode, situation = "") {
       : base;
   }
 
-  // 영어용 프롬프트
+  // English default system prompt
   const base = `
-You are a kind and native-level English speaker.
+You are a friendly and fluent English speaker.
 
 Rules:
 - Always respond only in English
 - Continue the conversation naturally, even if the user's message is short
-- Do not translate or switch languages
+- If the user asks about another language, explain it in English
+- Do not mention being an AI, assistant, or chatbot
   `.trim();
 
-  return scenarioText
-    ? `${base}\n\n[Scenario]\n${scenarioText}`
-    : base;
+  return scenarioText ? `${base}\n\n[Scenario]\n${scenarioText}` : base;
 }
 
 module.exports = { getSystemPrompt };

@@ -16,16 +16,8 @@ app.use(express.json());
 
 connectMongo(); // ✅ MongoDB 연결
 
-// 🎤 Google TTS
 app.post("/speak", async (req, res) => {
-  const { text, languageCode = "en-US", gender = "NEUTRAL" } = req.body;
-
-  const selectedGender =
-  customGender || genderMap[situation] || genderMap.default;
-
-  if (!text || typeof text !== "string") {
-    return res.status(400).json({ error: "텍스트가 없습니다." });
-  }
+  const { text, languageCode = "en-US", gender = "NEUTRAL", situation = "" } = req.body;
 
   const genderMap = {
     "izakaya-banker": "MALE",
@@ -34,19 +26,52 @@ app.post("/speak", async (req, res) => {
   };
 
   const voiceMap = {
-    "en-US": "en-US-Wavenet-F",
-    "ja-JP": "ja-JP-Wavenet-A",
+    "en-US": {
+    MALE: "en-US-Wavenet-D",
+    FEMALE: "en-US-Wavenet-F",
+    NEUTRAL: "en-US-Wavenet-F"
+  },
+  "ja-JP": {
+    MALE: "ja-JP-Wavenet-D",
+    FEMALE: "ja-JP-Wavenet-A",
+    NEUTRAL: "ja-JP-Wavenet-A"
+  }
   };
+
+  // 상황 기반으로 성별 선택
+  const selectedGender = situation && genderMap[situation]
+  ? genderMap[situation]
+  : gender;
+  const voiceName = voiceMap[languageCode]?.[selectedGender] || languageCode;
+
+  if (!text || typeof text !== "string") {
+    return res.status(400).json({ error: "텍스트가 없습니다." });
+  }
+  
+  let speakingRate = 0.85;
+  let pitch = 0;
+
+  if (situation === "izakaya-banker") {
+    speakingRate = 1.0;
+    pitch = -6;
+  } else if (situation === "airport-traveler") {
+    speakingRate = 1.05;
+    pitch = 1;
+  }
 
   const request = {
     input: { text },
     voice: {
       languageCode,
-      name: voiceMap[languageCode] || languageCode,
-      ssmlGender: selectedGender,
+      name: voiceName,
     },
-    audioConfig: { audioEncoding: "MP3" },
+    audioConfig: { audioEncoding: "MP3",
+      speakingRate,
+      pitch
+     },
+    
   };
+  
 
   try {
     const [response] = await ttsClient.synthesizeSpeech(request);
@@ -56,6 +81,7 @@ app.post("/speak", async (req, res) => {
     res.status(500).json({ error: "TTS 실패" });
   }
 });
+
 
 // 💬 GPT 대화
 app.post("/chat", async (req, res) => {
