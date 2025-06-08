@@ -4,6 +4,7 @@ const dotenv = require("dotenv");
 const textToSpeech = require("@google-cloud/text-to-speech");
 const { getGPTResponse } = require("./gpt");
 const connectMongo = require("./mongo");
+const Mistake = require("./models/Mistake");
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 dotenv.config();
@@ -49,13 +50,13 @@ app.post("/speak", async (req, res) => {
   }
   
   let speakingRate = 0.85;
-  let pitch = 0;
+  let pitch = -4;
 
   if (situation === "izakaya-banker") {
     speakingRate = 1.0;
     pitch = -6;
   } else if (situation === "airport-traveler") {
-    speakingRate = 1.05;
+    speakingRate = 0.95;
     pitch = 1;
   }
 
@@ -170,6 +171,17 @@ app.post("/pronounce", async (req, res) => {
   } catch (err) {
     console.error("발음 오류:", err.message);
     res.status(500).json({ error: "발음 변환 실패" });
+  }
+});
+
+app.get("/review/mistakes/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const data = await Mistake.find({ userId }).sort({ createdAt: -1 });
+    res.json(data);
+  } catch (err) {
+    console.error("복습 조회 오류:", err.message);
+    res.status(500).json({ error: "복습 데이터를 불러오는 데 실패했습니다." });
   }
 });
 

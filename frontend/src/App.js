@@ -30,17 +30,37 @@ function App() {
   const [listening, setListening] = useState(false);
   const [language, setLanguage] = useState("");
   const [situation, setSituation] = useState("");
+  const [mistakeList, setMistakeList] = useState([]);
 
   useEffect(() => {
+    // 새로고침 시 초기화
+    window.addEventListener("beforeunload", () => {
+      sessionStorage.removeItem("sessionId");
+      sessionStorage.removeItem("initialized");
+    });
     initSession();
   }, []);
+
+  useEffect(() => {
+    if (mode === "review") {
+      fetch(`http://localhost:5000/review/mistakes/${sessionId}`)
+        .then(res => res.json())
+        .then(data => {
+          console.log("mistake response:", data);
+          setMistakeList(Array.isArray(data) ? data : []);
+        })
+        .catch(err => console.error("복습 데이터 오류:", err));
+    }
+  }, [mode, sessionId]);
 
   const initSession = () => {
     const newId = "session-" + Math.random().toString(36).substring(2, 10);
     sessionStorage.setItem("sessionId", newId);
+    sessionStorage.setItem("initialized", "true");
     setSessionId(newId);
     setChatLog([]);
   };
+  
 
   const playTTS = async (text) => {
     try {
@@ -143,20 +163,34 @@ function App() {
   
 
   const handleVoice = () => {
-    if (listening) return;
-
+    console.log("🎤 handleVoice 호출됨");
+  
+    if (listening) {
+      console.log("이미 듣는 중이므로 종료");
+      return;
+    }
+  
     recognition.lang = language;
     setListening(true);
+    console.log("🎤 음성 인식 시작 시도: ", language);
     recognition.start();
-
+  
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
+      console.log("📝 인식된 텍스트:", transcript);
       sendMessage(transcript);
       setListening(false);
     };
-
-    recognition.onerror = () => setListening(false);
-    recognition.onend = () => setListening(false);
+  
+    recognition.onerror = (event) => {
+      console.error("❌ 음성 인식 오류:", event.error);
+      setListening(false);
+    };
+  
+    recognition.onend = () => {
+      console.log("🔚 음성 인식 종료됨");
+      setListening(false);
+    };
   };
   
   const toggleExtra = async (index, type) => {
@@ -237,6 +271,10 @@ function App() {
     setSituation("");
   };
 
+  const goToReview = () => {
+    setMode("review");
+  };
+
   const selectSituation = (desc) => {
     setSituation(desc);
     initSession();
@@ -249,25 +287,47 @@ function App() {
 
   return (
     <div style={{ maxWidth: "600px", margin: "40px auto", fontFamily: "Arial" }}>
-      <h2>외국어 회화 연습</h2>
+      <h2>외국어 회화 시뮬레이션</h2>
 
       {mode === "select" && (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: "30px", gap: "15px" }}>
-        <button
-          onClick={() => selectLanguage("ja-JP")}
-          style={{ width: "200px", padding: "10px 20px", fontSize: "16px" }}
-        >
-          일본어로 연습하기
-        </button>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginTop: "30px", gap: "15px" }}>
         <button
           onClick={() => selectLanguage("en-US")}
           style={{ width: "200px", padding: "10px 20px", fontSize: "16px" }}
         >
-          영어로 연습하기
+          영어
+        </button>
+        <button
+          onClick={() => selectLanguage("ja-JP")}
+          style={{ width: "200px", padding: "10px 20px", fontSize: "16px" }}
+        >
+          일본어
         </button>
       </div>
-      
-      )}
+    )}
+
+{mode === "review" && (
+  <div style={{ padding: "20px" }}>
+    <h3>복습하기</h3>
+    {mistakeList.length === 0 ? (
+      <p>저장된 틀린 표현이 없습니다.</p>
+    ) : (
+      mistakeList.map((item, idx) => (
+        <div key={idx} style={{ marginBottom: "15px", borderBottom: "1px solid #ccc", paddingBottom: "10px" }}>
+          <p><strong>내 문장:</strong> {item.original}</p>
+          <p><strong>교정:</strong> {item.corrected}</p>
+          {item.explanation && <p><strong>이유:</strong> {item.explanation}</p>}
+        </div>
+      ))
+    )}
+    <div style={{ marginTop: "20px", textAlign: "center" }}>
+      <button onClick={backToLanguageSelect} style={{ fontSize: "14px", padding: "6px 12px" }}>
+        다시 언어 선택으로
+      </button>
+    </div>
+  </div>
+)}
+
 
       {mode !== "select" && (
         <>
@@ -282,7 +342,7 @@ function App() {
                   border: "1px solid #ccc",
                 }}
               >
-                이자카야에서 만난 손님
+                이자캬야에서 만난 손님
               </button>
               {situation && (
                 <button
@@ -377,11 +437,18 @@ function App() {
             </button>
           </div>
 
+                    <div style={{ textAlign: "center", marginBottom: "15px" }}>
+            <button onClick={goToReview} style={{ padding: "10px 20px", fontSize: "16px" }}>
+              복습하기
+            </button>
+          </div>
+
           <div style={{ textAlign: "center" }}>
             <button onClick={backToLanguageSelect} style={{ fontSize: "14px", padding: "6px 12px" }}>
               다시 언어 선택으로
             </button>
           </div>
+
         </>
       )}
     </div>
