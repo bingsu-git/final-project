@@ -5,7 +5,7 @@ const textToSpeech = require("@google-cloud/text-to-speech");
 const { getGPTResponse } = require("./gpt");
 const connectMongo = require("./mongo");
 const Mistake = require("./models/Mistake");
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const User = require("./models/User");
 
 dotenv.config();
@@ -18,9 +18,6 @@ app.use(express.json());
 
 connectMongo(); // ✅ MongoDB 연결
 
-const patternRoute = require("./routes/pattern");
-app.use("/", patternRoute); 	
-
 app.post("/speak", async (req, res) => {
   const { text, languageCode = "en-US", gender = "NEUTRAL", situation = "" } = req.body;
 
@@ -30,31 +27,31 @@ app.post("/speak", async (req, res) => {
     default: "NEUTRAL",
   };
 
+  // --- ✨ 수정된 부분: 더 자연스러운 최신 목소리로 교체 ---
   const voiceMap = {
     "en-US": {
-    MALE: "en-US-Wavenet-D",
-    FEMALE: "en-US-Wavenet-F",
-    NEUTRAL: "en-US-Wavenet-F"
-  },
-  "ja-JP": {
-    MALE: "ja-JP-Wavenet-D",
-    FEMALE: "ja-JP-Wavenet-A",
-    NEUTRAL: "ja-JP-Wavenet-A"
-  }
+      MALE: "en-US-Studio-M",       // Studio 등급 남성 목소리
+      FEMALE: "en-US-Studio-O",     // Studio 등급 여성 목소리
+      NEUTRAL: "en-US-Studio-O"     // 기본값은 여성 목소리로 설정
+    },
+    "ja-JP": {
+      MALE: "ja-JP-Neural2-C",      // Neural2 등급 남성 목소리
+      FEMALE: "ja-JP-Neural2-B",      // Neural2 등급 여성 목소리
+      NEUTRAL: "ja-JP-Neural2-B"      // 기본값은 여성 목소리로 설정
+    }
   };
 
-  // 상황 기반으로 성별 선택
   const selectedGender = situation && genderMap[situation]
-  ? genderMap[situation]
-  : gender;
+    ? genderMap[situation]
+    : gender;
   const voiceName = voiceMap[languageCode]?.[selectedGender] || languageCode;
 
   if (!text || typeof text !== "string") {
     return res.status(400).json({ error: "텍스트가 없습니다." });
   }
   
-  let speakingRate = 1.0;
-  let pitch = 0;
+  let speakingRate = 1.0; // 기본 말하기 속도
+  let pitch = 0; // 기본 음높이
 
   if (situation === "izakaya-banker") {
     speakingRate = 1.0;
@@ -70,14 +67,13 @@ app.post("/speak", async (req, res) => {
       languageCode,
       name: voiceName,
     },
-    audioConfig: { audioEncoding: "MP3",
+    audioConfig: { 
+      audioEncoding: "MP3",
       speakingRate,
       pitch
-      },
-    
+    },
   };
   
-
   try {
     const [response] = await ttsClient.synthesizeSpeech(request);
     res.json({ audioContent: response.audioContent.toString("base64") });
@@ -90,15 +86,13 @@ app.post("/speak", async (req, res) => {
 
 // 💬 GPT 대화
 app.post("/chat", async (req, res) => {
-  // --- ✨ 수정된 부분: difficulty 추가 ---
-  const { message, languageCode = "en-US", sessionId, situation = "", difficulty = "medium" } = req.body;
+  const { message, languageCode, sessionId, situation, difficulty } = req.body;
 
   if (!message || !sessionId) {
     return res.status(400).json({ error: "메시지나 세션 ID가 없습니다." });
   }
 
   try {
-    // --- ✨ 수정된 부분: difficulty 전달 ---
     const reply = await getGPTResponse(message, languageCode, sessionId, situation, difficulty);
     res.json({ response: reply });
   } catch (err) {
@@ -115,7 +109,7 @@ app.post("/translate", async (req, res) => {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -151,7 +145,7 @@ app.post("/pronounce", async (req, res) => {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -160,8 +154,11 @@ app.post("/pronounce", async (req, res) => {
         messages: [
           {
             role: "system",
-            content:
-              "다음 문장을 한국인이 이해할 수 있도록 한글 발음(로마자 X, 한글식 표기)으로 변환해줘. 예: わたし → 와타시",
+            content: `Your task is to convert the user's sentence into a Hangul (Korean alphabet) phonetic transcription. This helps a Korean speaker read it to approximate the original pronunciation.
+- DO NOT translate the meaning of the sentence.
+- ONLY provide the phonetic transcription in Hangul.
+- Example 1: If the input is 'I love you', the output must be '아이 러브 유'.
+- Example 2: If the input is 'わたしはげんきです', the output must be '와타시와 겡키데스'.`
           },
           {
             role: "user",
@@ -192,15 +189,12 @@ app.get("/review/mistakes/:userId", async (req, res) => {
 app.get("/progress/:userId", async (req, res) => {
   const { userId } = req.params;
   
-
   try {
-    // User 컬렉션에서 메시지 수
     const user = await User.findOne({ userId });
     const messageCount = user
-  ? user.chatHistory.filter(m => m.role === "user").length
-  : 0;
+      ? user.chatHistory.filter(m => m.role === "user").length
+      : 0;
 
-    // Mistake 컬렉션에서 틀린 표현 수
     const mistakeCount = await Mistake.countDocuments({ userId });
 
     res.json({
@@ -213,11 +207,8 @@ app.get("/progress/:userId", async (req, res) => {
   }
 });
 
-
-
 // ✅ 서버 실행
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`서버 실행 중: http://localhost:${PORT}`);
 });
-
