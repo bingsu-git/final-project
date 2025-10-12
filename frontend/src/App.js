@@ -22,6 +22,58 @@ recognition.maxAlternatives = 1;
 const removeEmojis = (text) =>
   text.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|[\uD83C-\uDBFF\uDC00-\uDFFF]|\uFE0F|\u200D)+/g, '');
 
+// ✅ 복습 아이템 한 개용 컴포넌트
+function ReviewItem({ item, idx, guessInputs, setGuessInputs, showAnswers, setShowAnswers }) {
+
+  const normalize = (str) => str.trim().toLowerCase().replace(/\s+/g, " ");
+
+  return (
+    <div style={{ marginBottom: "15px", borderBottom: "1px solid #ccc", paddingBottom: "10px" }}>
+      <p><strong>틀린 문장:</strong> {item.original}</p>
+
+      <input
+        type="text"
+        placeholder="내가 고쳐보기"
+        value={guessInputs[idx] || ""}
+        onChange={(e) =>
+          setGuessInputs(prev => ({ ...prev, [idx]: e.target.value }))
+        }
+        style={{ width: "100%", padding: "5px", marginBottom: "10px" }}
+      />
+
+      <button
+        onClick={() => {
+          const isCorrect =
+            normalize(guessInputs[idx] || "") === normalize(item.corrected);
+          alert(isCorrect ? "정답입니다!" : "틀렸습니다!");
+        }}
+        style={{ marginRight: "10px" }}
+      >
+        맞춰보기
+      </button>
+
+      <button
+        onClick={() =>
+          setShowAnswers(prev => ({ ...prev, [idx]: !prev[idx] }))
+        }
+      >
+        {showAnswers[idx] ? "답 숨기기" : "답 보기"}
+      </button>
+
+      {showAnswers[idx] && (
+        <>
+          <p style={{ marginTop: "10px" }}><strong>정답:</strong> {item.corrected}</p>
+          {item.explanation && (
+            <p><strong>이유:</strong> {item.explanation}</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+
+
 function App() {
   const [mode, setMode] = useState("select");
   const [sessionId, setSessionId] = useState("");
@@ -29,8 +81,15 @@ function App() {
   const [visibleExtras, setVisibleExtras] = useState({});
   const [listening, setListening] = useState(false);
   const [language, setLanguage] = useState("");
-  const [situation, setSituation] = useState("");
+  const [situation, setSituation] = useState(null); // 초기값을 null로 변경
   const [mistakeList, setMistakeList] = useState([]);
+  const [progress, setProgress] = useState({ messageCount: 0, mistakeCount: 0 });
+  const [guessInputs, setGuessInputs] = useState({});
+  const [showAnswers, setShowAnswers] = useState({});
+  const [customSituationInput, setCustomSituationInput] = useState("");
+  // --- ✨ 새로운 기능 추가: 난이도 상태 ---
+  const [difficulty, setDifficulty] = useState('medium');
+
 
   useEffect(() => {
     // 새로고침 시 초기화
@@ -93,6 +152,8 @@ function App() {
           languageCode: language,
           sessionId,
           situation,
+          // --- ✨ 새로운 기능 추가: 난이도 정보 전송 ---
+          difficulty,
         }),
       });
       const data = await res.json();
@@ -103,10 +164,38 @@ function App() {
         pronunciation: null,
       };
       setChatLog((prev) => [...prev, gptMsg]);
+      fetch(`http://localhost:5000/progress/${sessionId}`)
+        .then(res => res.json())
+        .then(data => setProgress(data))
+        .catch(err => console.error("진행률 갱신 오류:", err));
+
+      if (mode === "review") {
+          fetch(`http://localhost:5000/review/mistakes/${sessionId}`)
+            .then(res => res.json())
+            .then(data => {
+              console.log("mistake 갱신:", data);
+              setMistakeList(Array.isArray(data) ? data : []);
+            })
+            .catch(err => console.error("복습 갱신 오류:", err));
+        }
+
+
       await playTTS(removeEmojis(data.response));
     } catch (err) {
       console.error("GPT 오류:", err);
     }
+  };
+  
+  const updateMessageWithExtras = (index, translation, pronunciation) => {
+    setChatLog((prev) => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        translation: translation ?? updated[index].translation,
+        pronunciation: pronunciation ?? updated[index].pronunciation,
+      };
+      return updated;
+    });
   };
 
   const handleTranslateOnly = async (text, index) => {
@@ -196,7 +285,6 @@ function App() {
   const toggleExtra = async (index, type) => {
     const msg = chatLog[index];
   
-    // 이미 표시 중이면 → 단순히 토글만
     if (visibleExtras[index]?.[type]) {
       setVisibleExtras((prev) => ({
         ...prev,
@@ -208,7 +296,6 @@ function App() {
       return;
     }
   
-    // 표시 안 돼 있고, 데이터도 없음 → API 호출
     if (!msg[type]) {
       const endpoint = type === "translation" ? "translate" : "pronounce";
   
@@ -233,7 +320,6 @@ function App() {
       }
     }
   
-    // 토글 ON 처리
     setVisibleExtras((prev) => ({
       ...prev,
       [index]: {
@@ -243,45 +329,32 @@ function App() {
     }));
   };
   
-  
-
-  const updateMessageWithExtras = (index, translation, pronunciation) => {
-    setChatLog((prev) => {
-      const updated = [...prev];
-      updated[index] = {
-        ...updated[index],
-        translation: translation ?? updated[index].translation,
-        pronunciation: pronunciation ?? updated[index].pronunciation,
-      };
-      return updated;
-    });
-  };
-  
-
   const selectLanguage = (lang) => {
     initSession();
     setMode(lang === "ja-JP" ? "ja" : "en");
     setLanguage(lang);
-    setSituation("");
+    setSituation(null); // 언어 선택 시 situation은 null로 초기화
   };
 
   const backToLanguageSelect = () => {
     initSession();
     setMode("select");
-    setSituation("");
+    setSituation(null);
   };
 
   const goToReview = () => {
     setMode("review");
   };
 
-  const selectSituation = (desc) => {
-    setSituation(desc);
+  const cancelSituation = () => {
+    setSituation(null); // 상황 설정 화면으로 돌아가기
     initSession();
   };
 
-  const cancelSituation = () => {
-    setSituation("");
+  const startCustomSituation = () => {
+    // 상황을 입력했든 안 했든, 대화를 시작하므로 situation을 입력값으로 설정
+    // null은 '상황 설정 전', ""은 '상황 없이 대화 시작'을 의미
+    setSituation(customSituationInput.trim());
     initSession();
   };
 
@@ -306,89 +379,67 @@ function App() {
       </div>
     )}
 
-{mode === "review" && (
-  <div style={{ padding: "20px" }}>
-    <h3>복습하기</h3>
-    {mistakeList.length === 0 ? (
-      <p>저장된 틀린 표현이 없습니다.</p>
-    ) : (
-      mistakeList.map((item, idx) => (
-        <div key={idx} style={{ marginBottom: "15px", borderBottom: "1px solid #ccc", paddingBottom: "10px" }}>
-          <p><strong>내 문장:</strong> {item.original}</p>
-          <p><strong>교정:</strong> {item.corrected}</p>
-          {item.explanation && <p><strong>이유:</strong> {item.explanation}</p>}
+    {mode === "review" && (
+      <div style={{ padding: "20px" }}>
+        <h3>복습하기</h3>
+        {mistakeList.length === 0 ? (
+          <p>저장된 틀린 표현이 없습니다.</p>
+        ) : (
+          mistakeList.map((item, idx) => (
+            <ReviewItem
+              key={idx}
+              item={item}
+              idx={idx}
+              guessInputs={guessInputs}
+              setGuessInputs={setGuessInputs}
+              showAnswers={showAnswers}
+              setShowAnswers={setShowAnswers}
+            />
+          ))
+        )}
+        <div style={{ marginTop: "20px", textAlign: "center" }}>
+          <button onClick={backToLanguageSelect} style={{ fontSize: "14px", padding: "6px 12px" }}>
+            다시 언어 선택으로
+          </button>
         </div>
-      ))
+      </div>
     )}
-    <div style={{ marginTop: "20px", textAlign: "center" }}>
-      <button onClick={backToLanguageSelect} style={{ fontSize: "14px", padding: "6px 12px" }}>
-        다시 언어 선택으로
-      </button>
-    </div>
-  </div>
-)}
 
+    {/* 상황 설정 화면 (situation이 null일 때) */}
+    {mode !== "select" && situation === null && (
+      <div style={{ border: "1px solid #eee", padding: "20px", borderRadius: "8px", marginTop: "20px" }}>
+        {/* --- ✨ 새로운 기능 추가: 난이도 선택 UI --- */}
+        <div>
+          <h3 style={{marginTop: 0}}>1. 대화 난이도를 선택하세요:</h3>
+          <div style={{display: 'flex', gap: '10px', marginBottom: '20px'}}>
+            <button onClick={() => setDifficulty('easy')} style={{backgroundColor: difficulty === 'easy' ? '#d1e7dd' : '#fff', border: '1px solid #ccc', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer'}}>하 (쉬움)</button>
+            <button onClick={() => setDifficulty('medium')} style={{backgroundColor: difficulty === 'medium' ? '#d1e7dd' : '#fff', border: '1px solid #ccc', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer'}}>중 (보통)</button>
+            <button onClick={() => setDifficulty('hard')} style={{backgroundColor: difficulty === 'hard' ? '#d1e7dd' : '#fff', border: '1px solid #ccc', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer'}}>상 (어려움)</button>
+          </div>
+        </div>
+        <hr style={{margin: '20px 0', border: 'none', borderTop: '1px solid #eee'}} />
+        <div>
+          <h3 style={{marginTop: 0}}>2. 어떤 상황에서 대화할까요?</h3>
+          <p style={{marginTop: 0, color: '#666'}}>상황을 입력하지 않고 시작하면 AI가 친구처럼 대화를 시작합니다.</p>
+          <textarea 
+              value={customSituationInput}
+              onChange={(e) => setCustomSituationInput(e.target.value)}
+              placeholder="예시: 저는 지금 스타벅스에 있고, 당신은 점원입니다. 저는 아이스 아메리카노를 주문하고 싶어요."
+              style={{width: '100%', minHeight: '80px', padding: '10px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ccc'}}
+          />
+          <button onClick={startCustomSituation} style={{fontSize: "16px", padding: "10px 20px", marginTop: '10px', width: '100%', backgroundColor: '#0d6efd', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>
+            대화 시작하기
+          </button>
+        </div>
+      </div>
+    )}
 
-      {mode !== "select" && (
+    {/* 대화창 화면 (situation이 null이 아닐 때) */}
+    {mode !== "select" && situation !== null && (
         <>
-          {mode === "ja" && (
-            <div style={{ marginBottom: "15px", display: "flex", gap: "10px" }}>
-              <button
-                onClick={() => selectSituation("izakaya-banker")}
-                style={{
-                  fontSize: "14px",
-                  padding: "6px 12px",
-                  backgroundColor: situation ? "#d1e7dd" : "#fff",
-                  border: "1px solid #ccc",
-                }}
-              >
-                이자캬야에서 만난 손님
-              </button>
-              {situation && (
-                <button
-                  onClick={cancelSituation}
-                  style={{
-                    fontSize: "14px",
-                    padding: "6px 12px",
-                    backgroundColor: "#f8d7da",
-                    border: "1px solid #ccc",
-                  }}
-                >
-                  취소
-                </button>
-              )}
-            </div>
-          )}
-          {mode === "en" && (
-  <div style={{ marginBottom: "15px", display: "flex", gap: "10px" }}>
-    <button
-      onClick={() => selectSituation("airport-traveler")}
-      style={{
-        fontSize: "14px",
-        padding: "6px 12px",
-        backgroundColor: situation === "airport-traveler" ? "#d1e7dd" : "#fff",
-        border: "1px solid #ccc",
-      }}
-    >
-      공항에서 만난 여행자
-    </button>
-    {situation === "airport-traveler" && (
-      <button
-        onClick={cancelSituation}
-        style={{
-          fontSize: "14px",
-          padding: "6px 12px",
-          backgroundColor: "#f8d7da",
-          border: "1px solid #ccc",
-        }}
-      >
-        취소
-      </button>
-    )}
-  </div>
-)}
-
-
+        <div style={{ textAlign: "center", marginBottom: "15px" }}>
+          <p>메시지 수: {progress.messageCount} | 틀린 표현 수: {progress.mistakeCount}</p>
+        </div>
           <div style={{
             border: "1px solid #ccc",
             padding: "10px",
@@ -410,8 +461,6 @@ function App() {
                     발음
                   </button>
 
-
-
                   {visibleExtras[i]?.translation && msg.translation && (
                     <div style={{ marginTop: "5px", color: "#333" }}>
                       <strong>번역:</strong> {msg.translation}
@@ -423,12 +472,10 @@ function App() {
                       <strong>발음:</strong> {msg.pronunciation}
                     </div>
                   )}
-
                 </div>
               )}
             </div>
           ))}
-
           </div>
 
           <div style={{ textAlign: "center", marginBottom: "15px" }}>
@@ -437,18 +484,20 @@ function App() {
             </button>
           </div>
 
-                    <div style={{ textAlign: "center", marginBottom: "15px" }}>
+          <div style={{ textAlign: "center", marginBottom: "15px" }}>
             <button onClick={goToReview} style={{ padding: "10px 20px", fontSize: "16px" }}>
               복습하기
             </button>
           </div>
 
           <div style={{ textAlign: "center" }}>
+            <button onClick={cancelSituation} style={{ fontSize: "14px", padding: "6px 12px", marginRight: '10px' }}>
+              다른 상황 설정하기
+            </button>
             <button onClick={backToLanguageSelect} style={{ fontSize: "14px", padding: "6px 12px" }}>
-              다시 언어 선택으로
+              언어 다시 선택하기
             </button>
           </div>
-
         </>
       )}
     </div>
@@ -456,3 +505,4 @@ function App() {
 }
 
 export default App;
+

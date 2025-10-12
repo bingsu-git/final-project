@@ -6,6 +6,7 @@ const { getGPTResponse } = require("./gpt");
 const connectMongo = require("./mongo");
 const Mistake = require("./models/Mistake");
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const User = require("./models/User");
 
 dotenv.config();
 
@@ -16,6 +17,9 @@ app.use(cors());
 app.use(express.json());
 
 connectMongo(); // ✅ MongoDB 연결
+
+const patternRoute = require("./routes/pattern");
+app.use("/", patternRoute); 	
 
 app.post("/speak", async (req, res) => {
   const { text, languageCode = "en-US", gender = "NEUTRAL", situation = "" } = req.body;
@@ -49,8 +53,8 @@ app.post("/speak", async (req, res) => {
     return res.status(400).json({ error: "텍스트가 없습니다." });
   }
   
-  let speakingRate = 0.85;
-  let pitch = -4;
+  let speakingRate = 1.0;
+  let pitch = 0;
 
   if (situation === "izakaya-banker") {
     speakingRate = 1.0;
@@ -69,7 +73,7 @@ app.post("/speak", async (req, res) => {
     audioConfig: { audioEncoding: "MP3",
       speakingRate,
       pitch
-     },
+      },
     
   };
   
@@ -86,14 +90,16 @@ app.post("/speak", async (req, res) => {
 
 // 💬 GPT 대화
 app.post("/chat", async (req, res) => {
-  const { message, languageCode = "en-US", sessionId, situation = "" } = req.body;
+  // --- ✨ 수정된 부분: difficulty 추가 ---
+  const { message, languageCode = "en-US", sessionId, situation = "", difficulty = "medium" } = req.body;
 
   if (!message || !sessionId) {
     return res.status(400).json({ error: "메시지나 세션 ID가 없습니다." });
   }
 
   try {
-    const reply = await getGPTResponse(message, languageCode, sessionId, situation);
+    // --- ✨ 수정된 부분: difficulty 전달 ---
+    const reply = await getGPTResponse(message, languageCode, sessionId, situation, difficulty);
     res.json({ response: reply });
   } catch (err) {
     console.error("GPT 오류:", err.message);
@@ -175,18 +181,43 @@ app.post("/pronounce", async (req, res) => {
 });
 
 app.get("/review/mistakes/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const data = await Mistake.find({
+    userId: userId
+  }).sort({ createdAt: -1 });
+  res.json(data);
+});
+
+// 📊 진행률 (Progress)
+app.get("/progress/:userId", async (req, res) => {
+  const { userId } = req.params;
+  
+
   try {
-    const { userId } = req.params;
-    const data = await Mistake.find({ userId }).sort({ createdAt: -1 });
-    res.json(data);
+    // User 컬렉션에서 메시지 수
+    const user = await User.findOne({ userId });
+    const messageCount = user
+  ? user.chatHistory.filter(m => m.role === "user").length
+  : 0;
+
+    // Mistake 컬렉션에서 틀린 표현 수
+    const mistakeCount = await Mistake.countDocuments({ userId });
+
+    res.json({
+      messageCount,
+      mistakeCount
+    });
   } catch (err) {
-    console.error("복습 조회 오류:", err.message);
-    res.status(500).json({ error: "복습 데이터를 불러오는 데 실패했습니다." });
+    console.error("진행률 조회 실패:", err.message);
+    res.status(500).json({ error: "진행률 조회 실패" });
   }
 });
+
+
 
 // ✅ 서버 실행
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`서버 실행 중: http://localhost:${PORT}`);
 });
+
