@@ -7,6 +7,7 @@ const connectMongo = require("./mongo");
 const Mistake = require("./models/Mistake");
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const User = require("./models/User");
+const verifyToken = require("./middleware/auth"); // 인증 미들웨어 추가
 
 dotenv.config();
 
@@ -16,9 +17,14 @@ const ttsClient = new textToSpeech.TextToSpeechClient();
 app.use(cors());
 app.use(express.json());
 
-connectMongo(); // ✅ MongoDB 연결
+connectMongo();
 
-app.post("/speak", async (req, res) => {
+/* ── 퀴즈 라우트 마운트 ─────────────────────────────────────── */
+const quizRouter = require("./routes/quiz");
+app.use("/quiz", quizRouter);
+
+/* ── TTS ───────────────────────────────────────────────────── */
+app.post("/speak", verifyToken, async (req, res) => {
   const { text, languageCode = "en-US", gender = "NEUTRAL", situation = "" } = req.body;
 
   const genderMap = {
@@ -26,54 +32,33 @@ app.post("/speak", async (req, res) => {
     "airport-traveler": "MALE",
     default: "NEUTRAL",
   };
-
-  // --- ✨ 수정된 부분: 더 자연스러운 최신 목소리로 교체 ---
   const voiceMap = {
-    "en-US": {
-      MALE: "en-US-Studio-M",       // Studio 등급 남성 목소리
-      FEMALE: "en-US-Studio-O",     // Studio 등급 여성 목소리
-      NEUTRAL: "en-US-Studio-O"     // 기본값은 여성 목소리로 설정
-    },
-    "ja-JP": {
-      MALE: "ja-JP-Neural2-C",      // Neural2 등급 남성 목소리
-      FEMALE: "ja-JP-Neural2-B",      // Neural2 등급 여성 목소리
-      NEUTRAL: "ja-JP-Neural2-B"      // 기본값은 여성 목소리로 설정
-    }
+    "en-US": { MALE: "en-US-Studio-M", FEMALE: "en-US-Studio-O", NEUTRAL: "en-US-Studio-O" },
+    "ja-JP": { MALE: "ja-JP-Neural2-C", FEMALE: "ja-JP-Neural2-B", NEUTRAL: "ja-JP-Neural2-B" },
+    "ko-KR": { MALE: "ko-KR-Neural2-B", FEMALE: "ko-KR-Neural2-A", NEUTRAL: "ko-KR-Neural2-B" },
   };
 
-  const selectedGender = situation && genderMap[situation]
-    ? genderMap[situation]
-    : gender;
-  const voiceName = voiceMap[languageCode]?.[selectedGender] || languageCode;
+  const selectedGender = situation && genderMap[situation] ? genderMap[situation] : gender;
+  const voiceName = voiceMap[languageCode]?.[selectedGender] || voiceMap[languageCode]?.NEUTRAL;
 
   if (!text || typeof text !== "string") {
     return res.status(400).json({ error: "텍스트가 없습니다." });
   }
-  
-  let speakingRate = 1.0; // 기본 말하기 속도
-  let pitch = 0; // 기본 음높이
 
+  let speakingRate = 0.85;
+  let pitch = -4;
   if (situation === "izakaya-banker") {
-    speakingRate = 1.0;
-    pitch = -6;
+    speakingRate = 1.0; pitch = -6;
   } else if (situation === "airport-traveler") {
-    speakingRate = 0.95;
-    pitch = 1;
+    speakingRate = 0.95; pitch = 1;
   }
 
   const request = {
     input: { text },
-    voice: {
-      languageCode,
-      name: voiceName,
-    },
-    audioConfig: { 
-      audioEncoding: "MP3",
-      speakingRate,
-      pitch
-    },
+    voice: { languageCode, name: voiceName },
+    audioConfig: { audioEncoding: "MP3", speakingRate, pitch },
   };
-  
+
   try {
     const [response] = await ttsClient.synthesizeSpeech(request);
     res.json({ audioContent: response.audioContent.toString("base64") });
@@ -83,17 +68,15 @@ app.post("/speak", async (req, res) => {
   }
 });
 
-
-// 💬 GPT 대화
-app.post("/chat", async (req, res) => {
-  const { message, languageCode, sessionId, situation, difficulty } = req.body;
-
-  if (!message || !sessionId) {
-    return res.status(400).json({ error: "메시지나 세션 ID가 없습니다." });
+/* ── Chat ───────────────────────────────────────────────────── */
+app.post("/chat", verifyToken, async (req, res) => {
+  const { uid } = req.user; 
+  const { message, languageCode, situation, difficulty } = req.body;
+  if (!message) {
+    return res.status(400).json({ error: "메시지가 없습니다." });
   }
-
   try {
-    const reply = await getGPTResponse(message, languageCode, sessionId, situation, difficulty);
+    const reply = await getGPTResponse(message, languageCode, uid, situation, difficulty);
     res.json({ response: reply });
   } catch (err) {
     console.error("GPT 오류:", err.message);
@@ -101,10 +84,9 @@ app.post("/chat", async (req, res) => {
   }
 });
 
-// 🌐 번역 (Translate)
-app.post("/translate", async (req, res) => {
+/* ── Translate ──────────────────────────────────────────────── */
+app.post("/translate", verifyToken, async (req, res) => {
   const { text } = req.body;
-
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -116,18 +98,11 @@ app.post("/translate", async (req, res) => {
         model: "gpt-4",
         temperature: 0.2,
         messages: [
-          {
-            role: "system",
-            content: "Translate the following sentence to Korean in a natural, fluent way.",
-          },
-          {
-            role: "user",
-            content: text,
-          },
+          { role: "system", content: "Translate the following sentence to Korean in a natural, fluent way." },
+          { role: "user", content: text },
         ],
       }),
     });
-
     const data = await response.json();
     const result = data.choices?.[0]?.message?.content?.trim() || "";
     res.json({ result });
@@ -137,10 +112,9 @@ app.post("/translate", async (req, res) => {
   }
 });
 
-// 🗣️ 발음 (Pronunciation)
-app.post("/pronounce", async (req, res) => {
+/* ── Pronounce ──────────────────────────────────────────────── */
+app.post("/pronounce", verifyToken, async (req, res) => {
   const { text } = req.body;
-
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -154,20 +128,13 @@ app.post("/pronounce", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `Your task is to convert the user's sentence into a Hangul (Korean alphabet) phonetic transcription. This helps a Korean speaker read it to approximate the original pronunciation.
-- DO NOT translate the meaning of the sentence.
-- ONLY provide the phonetic transcription in Hangul.
-- Example 1: If the input is 'I love you', the output must be '아이 러브 유'.
-- Example 2: If the input is 'わたしはげんきです', the output must be '와타시와 겡키데스'.`
+            content:
+              "Your task is to convert the user's sentence into a Hangul (Korean alphabet) phonetic transcription. This helps a Korean speaker read it to approximate the original pronunciation. - DO NOT translate the meaning of the sentence. - ONLY provide the phonetic transcription in Hangul. - Example 1: If the input is 'I love you', the output must be '아이 러브 유'. - Example 2: If the input is 'わたしはげんきです', the output must be '와타시와 겡키데스'.",
           },
-          {
-            role: "user",
-            content: text,
-          },
+          { role: "user", content: text },
         ],
       }),
     });
-
     const data = await response.json();
     const result = data.choices?.[0]?.message?.content?.trim() || "";
     res.json({ result });
@@ -177,38 +144,29 @@ app.post("/pronounce", async (req, res) => {
   }
 });
 
-app.get("/review/mistakes/:userId", async (req, res) => {
-  const { userId } = req.params;
-  const data = await Mistake.find({
-    userId: userId
-  }).sort({ createdAt: -1 });
+/* ── Review / Progress ──────────────────────────────────────── */
+app.get("/review/mistakes", verifyToken, async (req, res) => {
+  const { uid } = req.user;
+  const data = await Mistake.find({ userId: uid }).sort({ createdAt: -1 });
   res.json(data);
 });
 
-// 📊 진행률 (Progress)
-app.get("/progress/:userId", async (req, res) => {
-  const { userId } = req.params;
-  
+app.get("/progress", verifyToken, async (req, res) => {
+  const { uid } = req.user;
   try {
-    const user = await User.findOne({ userId });
-    const messageCount = user
-      ? user.chatHistory.filter(m => m.role === "user").length
-      : 0;
-
-    const mistakeCount = await Mistake.countDocuments({ userId });
-
-    res.json({
-      messageCount,
-      mistakeCount
-    });
+    const user = await User.findOne({ userId: uid });
+    const messageCount = user ? user.chatHistory.filter(m => m.role === "user").length : 0;
+    const mistakeCount = await Mistake.countDocuments({ userId: uid });
+    res.json({ messageCount, mistakeCount });
   } catch (err) {
     console.error("진행률 조회 실패:", err.message);
     res.status(500).json({ error: "진행률 조회 실패" });
   }
 });
 
-// ✅ 서버 실행
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`서버 실행 중: http://localhost:${PORT}`);
 });
+
+console.log("[OPENAI_KEY_PREFIX]", (process.env.OPENAI_API_KEY||"").slice(0,8));

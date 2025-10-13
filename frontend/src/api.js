@@ -1,66 +1,51 @@
-// frontend/src/api.js
+import { auth } from "./firebase";
 
-const API_BASE_URL = "http://localhost:5000";
+// API 요청을 보내기 전에 인증 토큰을 헤더에 추가하는 래퍼 함수
+const request = async (endpoint, options = {}) => {
+  const token = await auth.currentUser?.getIdToken();
 
-// API 요청을 위한 기본 헬퍼 함수
-async function request(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
   const headers = {
     "Content-Type": "application/json",
     ...options.headers,
   };
-
-  try {
-    const response = await fetch(url, { ...options, headers });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error(`API request failed for endpoint: ${endpoint}`, error);
-    throw error;
+  
+  // 로그인 상태일 때만 Authorization 헤더 추가
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
-}
 
-// 💬 GPT 대화 요청
-export const fetchChatResponse = ({ message, languageCode, sessionId, situation, difficulty }) => {
-  return request("/chat", {
-    method: "POST",
-    body: JSON.stringify({ message, languageCode, sessionId, situation, difficulty }),
+  const response = await fetch(`http://localhost:5000${endpoint}`, {
+    ...options,
+    headers,
   });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return response.json();
 };
 
-// 🗣️ TTS 음성 요청
-export const fetchTTS = ({ text, languageCode, situation }) => {
-  return request("/speak", {
-    method: "POST",
-    body: JSON.stringify({ text, languageCode, situation }),
-  });
-};
 
-// 🌐 번역 요청
-export const fetchTranslation = (text) => {
-  return request("/translate", {
-    method: "POST",
-    body: JSON.stringify({ text }),
-  });
-};
+export const fetchTTS = (body) => request("/speak", { method: "POST", body: JSON.stringify(body) });
 
-// 🗣️ 발음 요청 (✨✨✨ 이 부분의 주소가 "/pronounce"로 수정되었습니다 ✨✨✨)
-export const fetchPronunciation = (text) => {
-  return request("/pronounce", { // <--- 여기가 "/translate"가 아닌 "/pronounce"여야 합니다.
-    method: "POST",
-    body: JSON.stringify({ text }),
-  });
-};
+export const fetchChatResponse = (body) => request("/chat", { method: "POST", body: JSON.stringify(body) });
 
-// 📊 진행률 요청
-export const fetchProgress = (userId) => {
-  return request(`/progress/${userId}`);
-};
+export const fetchTranslation = (text) => request("/translate", { method: "POST", body: JSON.stringify({ text }) });
 
-// ✅ 복습 데이터 요청
-export const fetchMistakes = (userId) => {
-  return request(`/review/mistakes/${userId}`);
-};
+export const fetchPronunciation = (text) => request("/pronounce", { method: "POST", body: JSON.stringify({ text }) });
 
+// sessionId 대신 인증 토큰을 사용하므로 경로에서 ID 제거
+export const fetchMistakes = () => request("/review/mistakes");
+
+export const fetchProgress = () => request("/progress");
+
+export const fetchQuizGenerate = (total=10) =>
+  request("/quiz/generate", { method: "POST", body: JSON.stringify({ total }) });
+
+export const fetchQuizDue = () => request("/quiz/due");
+
+export const submitQuizAnswer = (itemId, userAnswer) =>
+  request("/quiz/answer", { method: "POST", body: JSON.stringify({ itemId, userAnswer }) });
+
+export const deleteQuizItem = (id) =>
+  request(`/quiz/item/${id}`, { method: "DELETE" });
