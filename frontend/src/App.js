@@ -189,7 +189,7 @@ function App() {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h2>스픽업</h2>
+        <h2>챗버디</h2>
         {user && (
           <div className="user-info">
             <span>{user.email}</span>
@@ -217,3 +217,4 @@ function App() {
 }
 
 export default App;
+

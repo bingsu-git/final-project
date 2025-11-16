@@ -62,14 +62,15 @@ export default function QuizView({ onBack }) {
               <button
                 className="quiz-delete"
                 title="이 문제 삭제"
-                onClick={async () => {
-                  if (!window.confirm('이 문제를 삭제할까요?')) return;
-                  try {
-                    await api.deleteQuizItem(it._id);
-                    setItems(prev => prev.filter((_, i) => i !== idx));
-                  } catch (e) {
-                    console.error(e); alert('삭제 실패');
-                  }
+                onClick={async () => {
+                  if (!window.confirm('이 문제를 삭제할까요?')) return;
+                  try {
+                    await api.deleteQuizItem(it._id);
+                      // ✨ 고유 ID(it._id)로 필터링하여 더 안전하게 상태 업데이트
+                    setItems(prev => prev.filter(item => item._id !== it._id));
+                  } catch (e) {
+                    console.error(e); alert('삭제 실패');
+                  }
                 }}
               >×</button>
                 <div className="quiz-stem">{it.stem || '다음 문장을 올바르게 고치세요.'}</div>

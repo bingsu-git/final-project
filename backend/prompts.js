@@ -1,4 +1,3 @@
-// --- ✨ 수정된 부분: difficultyInstructions 객체 추가 ---
 const difficultyInstructions = {
   easy: {
     "ja-JP": "あなたは初心者向けの対話相手です。常に短く、簡単で基本的な単語だけを使ってください。",
@@ -14,11 +13,9 @@ const difficultyInstructions = {
   }
 };
 
-// --- ✨ 수정된 부분: difficulty 파라미터 추가 ---
 function getSystemPrompt(languageCode, situation = "", difficulty = "medium") {
   const scenarioText = situation;
   
-  // --- ✨ 수정된 부분: 난이도별 지시사항 선택 ---
   const difficultyText = difficultyInstructions[difficulty]?.[languageCode] || difficultyInstructions.medium[languageCode];
 
   if (languageCode === "ja-JP") {
@@ -30,7 +27,6 @@ function getSystemPrompt(languageCode, situation = "", difficulty = "medium") {
 - 【シナリオ】がなければ、単に親しい友人として自然な会話を始めてください。
     `.trim();
 
-    // --- ✨ 수정된 부분: 최종 프롬프트에 난이도 지시사항 결합 ---
     const finalPrompt = `${base}\n\n【難易度】\n${difficultyText}`;
     
     return scenarioText
@@ -38,7 +34,6 @@ function getSystemPrompt(languageCode, situation = "", difficulty = "medium") {
       : finalPrompt;
   }
 
-  // English Prompt
   const base = `
 You are an AI role-playing expert. Your only goal is to have a natural, realistic conversation.
 - You are NOT an AI assistant or a language teacher.
@@ -47,7 +42,6 @@ You are an AI role-playing expert. Your only goal is to have a natural, realisti
 - If no [Scenario] is provided, simply act as a friendly conversation partner and start a natural conversation.
   `.trim();
 
-  // --- ✨ 수정된 부분: 최종 프롬프트에 난이도 지시사항 결합 ---
   const finalPrompt = `${base}\n\n[Difficulty Level]\n${difficultyText}`;
 
   return scenarioText

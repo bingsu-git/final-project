@@ -1,90 +1,109 @@
-// backend/gpt.js
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const User = require("./models/User");
 const { getSystemPrompt } = require("./prompts");
-const { checkGrammarHybrid } = require('./grammarChecker');
+const { checkGrammar } = require('./grammarChecker');
 
 const CONTEXT_WINDOW_SIZE = 20;
-
-// 환경 변수로 모델을 바꿀 수 있게 하고, 기본은 최신 가벼운 모델 사용
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
-// 공통 OpenAI 호출 함수: 에러 바디까지 모두 로깅
-async function callOpenAIChat(messages, { temperature = 0.2, model = CHAT_MODEL } = {}) {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY 가 설정되어 있지 않습니다.");
+// ✨ [핵심 수정]
+// 1. 함수 이름을 'callOpenAI'로 변경하고 'export' 키워드를 추가했습니다.
+// 2. 이 함수가 'messages', 'model', 'temperature'를 인자로 받도록 하여,
+//    번역, 발음 변환 등 다양한 작업에 재사용할 수 있도록 범용성을 높였습니다.
+async function callOpenAI({
+  messages,
+  model = "gpt-4o-mini", // 기본 모델 설정
+  temperature = 0.2,   // 기본 온도 설정
+  responseFormat = null // JSON 모드 등 추가 옵션
+}) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY 가 설정되어 있지 않습니다.");
+  }
+
+  const body = {
+    model,
+    temperature,
+    messages
+  };
+
+  // JSON 모드 옵션이 있으면 body에 추가
+  if (responseFormat) {
+    body.response_format = responseFormat;
   }
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ model, temperature, messages }),
-    // node-fetch v2는 timeout 옵션이 없어서 AbortController를 쓰는 게 정석이지만,
-    // 간단하게는 인프라 네트워크만 확인해도 됨.
-  });
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
 
-  const text = await res.text(); // 먼저 텍스트로 받았다가 JSON 파싱
-  if (!res.ok) {
-    // 에러 바디를 그대로 로그로 남김
-    throw new Error(`OpenAI API ${res.status} ${res.statusText} - ${text}`);
-  }
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`OpenAI API ${res.status} ${res.statusText} - ${text}`);
+  }
 
-  let data;
-  try { data = JSON.parse(text); } catch (e) {
-    throw new Error(`OpenAI 응답 JSON 파싱 실패: ${e.message}. body=${text.slice(0, 500)}`);
-  }
+  let data;
+  try { data = JSON.parse(text); } catch (e) {
+    throw new Error(`OpenAI 응답 JSON 파싱 실패: ${e.message}. body=${text.slice(0, 500)}`);
+  }
 
-  const reply = data?.choices?.[0]?.message?.content?.trim();
-  if (!reply) {
-    throw new Error(`OpenAI 응답에 message.content가 없음. body=${text.slice(0, 500)}`);
-  }
-  return reply;
+  // ✨ [수정] 응답 구조를 data 객체 그대로 반환하여 유연성 확보
+  // (예: grammarChecker.js에서 JSON.parse(content) 대신 data.choices[0].message.content를 바로 사용)
+  return data;
 }
 
-// sessionId 대신 userId(Firebase uid)를 받아서 히스토리 유지
 async function getGPTResponse(message, languageCode = "ja-JP", userId = "", situation = "", difficulty = "medium") {
-  const systemPrompt = getSystemPrompt(languageCode, situation, difficulty);
+  const systemPrompt = getSystemPrompt(languageCode, situation, difficulty);
 
-  // 사용자 문서 확보
-  let user = await User.findOne({ userId });
-  if (!user) {
-    user = await User.create({
-      userId,
-      languageCode,
-      chatHistory: [],
+  let user = await User.findOne({ userId });
+  if (!user) {
+    user = await User.create({
+      userId,
+      languageCode,
+      chatHistory: [],
+    });
+  }
+
+  const recentHistory = user.chatHistory.slice(-CONTEXT_WINDOW_SIZE);
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...recentHistory,
+    { role: "user", content: message }
+  ];
+
+  try {
+    // ✨ [수정] 새로 만든 범용 'callOpenAI' 함수를 호출합니다.
+    const data = await callOpenAI({
+      messages,
+      model: CHAT_MODEL, // 채팅 전용 모델 사용
+      temperature: 0.2
     });
-  }
-
-  const recentHistory = user.chatHistory.slice(-CONTEXT_WINDOW_SIZE);
-  const messages = [
-    { role: "system", content: systemPrompt },
-    ...recentHistory,
-    { role: "user", content: message }
-  ];
-
-  try {
-    const reply = await callOpenAIChat(messages, { temperature: 0.2 });
-    // 성공 시 히스토리 기록
-    user.chatHistory.push({ role: "user", content: message });
-    user.chatHistory.push({ role: "assistant", content: reply });
-    await user.save();
-
-    // 문법 검사 기록
-    try {
-      await checkGrammarHybrid(userId, message, languageCode);
-    } catch (e) {
-      console.warn("[GrammarChecker] non-blocking error:", e.message);
+    
+    const reply = data?.choices?.[0]?.message?.content?.trim();
+    if (!reply) {
+      throw new Error(`OpenAI 응답에 message.content가 없음.`);
     }
 
-    return reply;
-  } catch (err) {
-    // 서버 로그에 원인 남기고, 프런트엔드는 500 처리
-    console.error("[OpenAI chat error]", err.message);
-    throw err; // index.js에서 500으로 전달
-  }
+    user.chatHistory.push({ role: "user", content: message });
+    user.chatHistory.push({ role: "assistant", content: reply });
+    await user.save();
+
+    try {
+      await checkGrammar(userId, message, languageCode);
+    } catch (e) {
+      console.warn("[GrammarChecker] non-blocking error:", e.message);
+    }
+
+    return reply;
+  } catch (err) {
+    console.error("[OpenAI chat error]", err.message);
+    throw err;
+  }
 }
 
-module.exports = { getGPTResponse };
+// ✨ [핵심 수정] 'getGPTResponse'와 함께 'callOpenAI' 함수도 export 합니다.
+module.exports = { getGPTResponse, callOpenAI };
+
