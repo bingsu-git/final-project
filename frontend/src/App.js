@@ -1,220 +1,329 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import { auth, logout } from "./firebase";
-import { onAuthStateChanged } from "firebase/auth";
-import * as api from "./api";
-import AuthView from "./components/AuthView";
-import LanguageSelectView from "./components/LanguageSelectView";
-import SetupView from "./components/SetupView";
-import ChatView from "./components/ChatView";
-import ReviewView from "./components/ReviewView";
-import QuizView from "./components/QuizView";
-import "./App.css";
+import React, { useState, useEffect, useRef } from 'react';
+import { auth } from './firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import * as api from './api';
+import './App.css';
+
+// 컴포넌트
+import AuthView from './components/AuthView';
+import SetupView from './components/SetupView';
+import ChatView from './components/ChatView';
+import ReviewView from './components/ReviewView';
+import QuizView from './components/QuizView';
+import LanguageSelectView from './components/LanguageSelectView';
+
+// Web Speech API 브라우저 호환성 체크
+const SpeechRecognition =
+  window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+}
+
+// ✨ 다크모드 전역 스타일
+const styles = {
+  app: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100vh',
+    width: '100vw',
+    backgroundColor: '#1e1e2f',
+    color: '#e0e0e0',
+    fontFamily: 'Arial, sans-serif',
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '16px 32px',
+    backgroundColor: '#2c2c3e',
+    borderBottom: '1px solid #444',
+  },
+  logo: {
+    fontSize: '1.5rem',
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  userInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+  },
+  userEmail: {
+    fontSize: '0.9rem',
+    color: '#aaa',
+  },
+  logoutButton: {
+    background: '#555',
+    color: 'white',
+    border: 'none',
+    padding: '8px 12px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  },
+  main: {
+    flexGrow: 1,
+    overflowY: 'auto',
+    padding: '20px',
+  },
+  loading: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100vh',
+    fontSize: '1.5rem',
+  },
+};
 
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState("select");
+  const [currentView, setCurrentView] = useState('auth'); // 'auth' → 'language' → 'setup'/'chat'
+
+  // 채팅 상태
   const [chatLog, setChatLog] = useState([]);
-  const [listening, setListening] = useState(false);
-  const [language, setLanguage] = useState("");
-  const [situation, setSituation] = useState(null);
-  const [progress, setProgress] = useState({ messageCount: 0, mistakeCount: 0 });
   const [difficulty, setDifficulty] = useState('medium');
 
-  const recognitionRef = useRef(null);
+  // 모드 / 언어 / 상황 등 통합 설정
+  const [chatConfig, setChatConfig] = useState({
+    situation: '',
+    difficulty: 'medium',
+    mode: 'roleplay', // 'roleplay' | 'rag'
+    languageCode: 'en-US',
+  });
 
+  // difficulty 상태와 chatConfig 동기화
+  useEffect(() => {
+    setChatConfig((prev) => ({ ...prev, difficulty }));
+  }, [difficulty]);
+
+  // 음성 인식 / 전송 상태
+  const [listening, setListening] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+
+  const audioRef = useRef(null); // AI 음성 재생용
+
+  // 1. 로그인 상태 감지 → 뷰 전환
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
-      if (currentUser) {
-        setMode('select');
-      }
+      setCurrentView(currentUser ? 'language' : 'auth');
     });
     return () => unsubscribe();
   }, []);
 
-  const initSession = useCallback(() => {
-    setChatLog([]);
-  }, []);
-
-  const updateProgress = useCallback(async () => {
-    if (!user) return;
-    try {
-      const data = await api.fetchProgress();
-      setProgress(data);
-    } catch (err) {
-      console.error("진행률 갱신 오류:", err);
-    }
-  }, [user]);
-
-  const playTTS = useCallback(async (text) => {
-    try {
-      const cleanText = text.replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|[\uD83C-\uDBFF\uDC00-\uDFFF]|\uFE0F|\u200D)+/g, '');
-      const data = await api.fetchTTS({ text: cleanText, languageCode: language, situation });
-      if (data.audioContent) {
-        const audio = new Audio("data:audio/mp3;base64," + data.audioContent);
-        audio.play();
-      }
-    } catch (err) {
-      console.error("TTS 오류:", err);
-    }
-  }, [language, situation]);
-
-  const sendMessage = useCallback(async (text) => {
-    if (!text.trim() || !user) return;
-    const userMsg = { role: "user", content: text };
-    setChatLog((prev) => [...prev, userMsg]);
-
-    try {
-      const data = await api.fetchChatResponse({
-        message: text,
-        languageCode: language,
-        situation,
-        difficulty,
-      });
-      const gptMsg = { role: "assistant", content: data.response };
-      setChatLog((prev) => [...prev, gptMsg]);
-      await playTTS(data.response);
-      updateProgress();
-    } catch (err) {
-      console.error("GPT 오류:", err);
-    }
-  }, [user, language, situation, difficulty, playTTS, updateProgress]);
-
+  // 2. STT 이벤트 핸들러
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      console.error("이 브라우저는 음성 인식을 지원하지 않습니다.");
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.interimResults = false;
-    recognition.continuous = false;
-    recognition.maxAlternatives = 1;
+    if (!recognition) return;
 
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
+      setListening(false);
       sendMessage(transcript);
     };
-    recognition.onerror = (event) => { console.error("음성 인식 오류:", event.error); };
-    recognition.onend = () => { setListening(false); };
-    recognitionRef.current = recognition;
-  }, [sendMessage]);
+    recognition.onend = () => setListening(false);
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      setListening(false);
+    };
+  }, [chatConfig]);
 
-  useEffect(() => {
-    if (user) {
-      initSession();
-    }
-  }, [user, initSession]);
+  // 3. 메시지 전송 (RAG / 롤플레잉 공통)
+  const sendMessage = async (message) => {
+    if (isSending || !message.trim()) return;
+    setIsSending(true);
 
-  const startListening = () => {
-    if (listening || !recognitionRef.current) return;
-    recognitionRef.current.lang = language;
-    setListening(true);
-    recognitionRef.current.start();
-  };
+    const userMessage = { role: 'user', content: message };
+    setChatLog((prev) => [...prev, userMessage]);
 
-  const stopListening = () => {
-    if (!listening || !recognitionRef.current) return;
-    recognitionRef.current.stop();
-  };
-
-  const handleLogout = async () => {
     try {
-      await logout();
-    } catch (error) {
-      console.error("로그아웃 실패:", error);
+      let aiResponseText = '';
+      const currentMode = chatConfig.mode;
+      const currentLang =
+        currentMode === 'rag'
+          ? chatConfig.languageCode || 'ko-KR'
+          : chatConfig.languageCode || 'en-US';
+
+      if (currentMode === 'rag') {
+        // 법률 RAG 모드
+        const data = await api.fetchRagResponse(message);
+        aiResponseText = data.response;
+      } else {
+        // 롤플레잉 모드
+        const config = {
+          message,
+          languageCode: currentLang,
+          situation: chatConfig.situation,
+          difficulty: chatConfig.difficulty,
+        };
+        const data = await api.fetchChatResponse(config);
+        aiResponseText = data.response;
+      }
+
+      const aiMessage = { role: 'assistant', content: aiResponseText };
+      setChatLog((prev) => [...prev, aiMessage]);
+
+      // 🔇 RAG 모드에서는 TTS 완전 비활성화
+      if (currentMode !== 'rag') {
+        const ttsData = await api.fetchTTS({
+          text: aiResponseText,
+          languageCode: currentLang,
+        });
+        const audioContent = ttsData.audioContent;
+
+        if (audioContent && audioRef.current) {
+          const audioSrc = `data:audio/mpeg;base64,${audioContent}`;
+          audioRef.current.src = audioSrc;
+          audioRef.current.play();
+        }
+      }
+    } catch (err) {
+      console.error('Message sending failed:', err);
+    } finally {
+      setIsSending(false);
     }
   };
 
-  const selectLanguage = (lang) => {
-    initSession();
-    setLanguage(lang);
-    setMode("setup");
-    setSituation(null);
-  };
-
-  const startConversation = (customSituation) => {
-    initSession();
-    setSituation(customSituation.trim());
-    setMode("chat");
-    updateProgress(); // 대화 시작 시 진행률 초기 로드
-  };
-
-  const resetToSetup = () => {
-    setMode("setup");
-    setSituation(null);
-  };
-
-  // 아래 중앙 배치용: 언어 선택 화면으로 이동
-  const goToLanguageSelect = useCallback(() => {
-    if (recognitionRef.current && listening) {
-      recognitionRef.current.stop();
+  // 4. 음성 인식 컨트롤
+  const handleStartListening = () => {
+    if (listening || isSending || !recognition) return;
+    try {
+      recognition.lang =
+        chatConfig.mode === 'rag'
+          ? 'ko-KR'
+          : chatConfig.languageCode || 'en-US';
+      recognition.start();
+      setListening(true);
+    } catch (err) {
+      console.error('STT start failed:', err);
     }
+  };
+
+  const handleStopListening = () => {
+    if (!listening || !recognition) return;
+    recognition.stop();
     setListening(false);
+  };
+
+  // 5. 언어/모드 선택 (영어/일본어/법률 RAG)
+  const handleLanguageSelect = ({ mode, languageCode }) => {
+    if (mode === 'rag') {
+      // 법률 RAG는 바로 채팅 진입
+      setChatConfig({
+      situation: "",
+      difficulty: "medium",
+      mode: "rag",
+      languageCode: "ko-KR",
+      });
+      setChatLog([]);
+      setCurrentView('chat');
+    } else {
+      // 롤플레잉 모드 → 난이도/상황 설정
+      setChatConfig((prev) => ({
+        ...prev,
+        mode: 'roleplay',
+        languageCode,
+        situation: '',
+      }));
+      setCurrentView('setup');
+    }
+  };
+
+  const handleResetLanguage = () => {
+    setChatConfig((prev) => ({
+      ...prev,
+      mode: 'roleplay',
+      situation: '',
+    }));
+    setCurrentView('language');
+  };
+
+  // 6. 롤플레잉용 Setup 완료 → 채팅 진입
+  const handleStartChat = (situation) => {
+    setChatConfig((prev) => ({
+      ...prev,
+      situation,
+      mode: 'roleplay',
+      difficulty,
+    }));
     setChatLog([]);
-    setLanguage("");
-    setSituation(null);
-    setMode("select");
-  }, [listening]);
+    setCurrentView('chat');
+  };
 
-  const renderContent = () => {
-    if (loading) return <div className="loading-spinner"></div>;
-    if (!user) return <AuthView />;
+  const handleResetSetup = () => {
+    setCurrentView('language');
+  };
 
-    switch (mode) {
-      case "select":
-        return <LanguageSelectView onSelectLanguage={selectLanguage} />;
-      case "setup":
-        return <SetupView difficulty={difficulty} setDifficulty={setDifficulty} onStart={startConversation} />;
-      case "chat":
-        return <ChatView
-          chatLog={chatLog} setChatLog={setChatLog}
-          progress={progress}
-          listening={listening} onStartListening={startListening} onStopListening={stopListening}
-          onGoToReview={() => setMode("review")}
-          onGoToQuiz={() => setMode("quiz")}
-          onResetSetup={resetToSetup}
-        />;
-        case "review":
-        return <ReviewView onBack={() => setMode("chat")} />;
-      case "quiz":
-        return <QuizView onBack={() => setMode("chat")} />;
+  if (loading) {
+    return <div style={styles.loading}>Loading...</div>;
+  }
+
+  const renderView = () => {
+    switch (currentView) {
+      case 'auth':
+        return <AuthView />;
+
+      case 'language':
+        return <LanguageSelectView onSelect={handleLanguageSelect} />;
+
+      case 'setup':
+        return (
+          <SetupView
+            difficulty={difficulty}
+            setDifficulty={setDifficulty}
+            onStart={handleStartChat}
+            onResetLanguage={handleResetLanguage}
+          />
+        );
+
+      case 'chat':
+        return (
+          <ChatView
+            chatLog={chatLog}
+            setChatLog={setChatLog}
+            listening={listening || isSending}
+            onStartListening={handleStartListening}
+            onStopListening={handleStopListening}
+            onGoToReview={() => setCurrentView('review')}
+            onGoToQuiz={() => setCurrentView('quiz')}
+            onResetSetup={() => setCurrentView('language')}
+            chatConfig={chatConfig}     
+            onSendText={sendMessage}    
+          />
+        );
+
+      case 'review':
+        return <ReviewView onBack={() => setCurrentView('chat')} />;
+
+      case 'quiz':
+        return <QuizView onBack={() => setCurrentView('chat')} />;
+
       default:
-        return <div>잘못된 모드입니다.</div>;
+        return <AuthView />;
     }
   };
 
   return (
-    <div className="app-container">
-      <header className="app-header">
-        <h2>챗버디</h2>
-        {user && (
-          <div className="user-info">
-            <span>{user.email}</span>
-            <button onClick={handleLogout} className="btn btn-secondary">로그아웃</button>
-          </div>
-        )}
-      </header>
-
-      <main className="app-content">
-        {renderContent()}
-        {user && (
-          <footer className="app-footer">
-            <button
-              onClick={goToLanguageSelect}
-              className="btn btn-secondary"
-              title="언어 선택 화면으로 이동"
-            >
-              언어 선택
+    <div className="App" style={styles.app}>
+      {user && (
+        <header style={styles.header}>
+          <div style={styles.logo}>챗버디</div>
+          <div style={styles.userInfo}>
+            <span style={styles.userEmail}>{user.email}</span>
+            <button style={styles.logoutButton} onClick={() => signOut(auth)}>
+              로그아웃
             </button>
-          </footer>
-        )}
-      </main>
+          </div>
+        </header>
+      )}
+      <main style={styles.main}>{renderView()}</main>
+      <audio ref={audioRef} hidden />
     </div>
   );
 }
 
 export default App;
-

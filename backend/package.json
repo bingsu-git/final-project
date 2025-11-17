@@ -19,6 +19,7 @@
     "mongoose": "^8.13.2",
     "node-fetch": "^3.3.2",
     "openai": "^4.89.0",
-    "wanakana": "^5.3.1"
+    "wanakana": "^5.3.1",
+    "xml2js": "^0.6.2"
   }
 }

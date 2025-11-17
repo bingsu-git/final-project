@@ -9,6 +9,10 @@ const userSchema = new mongoose.Schema({
       content: String,
     }
   ],
+
+  // ✨ [추가] 아바타 이미지 (data URL)
+  userAvatar: { type: String, default: null },
+  assistantAvatar: { type: String, default: null },
 });
 
 const User = mongoose.model("User", userSchema);
